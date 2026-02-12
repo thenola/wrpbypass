@@ -17,42 +17,105 @@ from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
 
 
-VERSION = "1.2"
+VERSION = "1.3"
 GITHUB = "thenola/wrpbypass"
-LOG_FILE = "wrpbypass.log"
+
+
+def _detect_data_dir() -> Path:
+    """
+    Choose a writable directory for config/logs.
+
+    Priority:
+    1) WRP_DIR environment variable
+    2) If running from System32 -> C:\\ProgramData\\wrpbypass
+    3) Otherwise: <script_dir>\\data
+    """
+    env = os.environ.get("WRP_DIR")
+    if env:
+        p = Path(env)
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except Exception:
+            pass
+
+    try:
+        if getattr(sys, "frozen", False):
+            here = Path(sys.executable).resolve().parent
+        else:
+            here = Path(__file__).resolve().parent
+    except Exception:
+        here = Path.cwd()
+
+    system_root = Path(os.environ.get("SystemRoot", r"C:\\Windows"))
+    system32 = system_root / "System32"
+
+    try:
+        if here.samefile(system32):
+            base = Path(os.environ.get("SystemDrive", "C:")) / "ProgramData" / "wrpbypass"
+        else:
+            base = here / "data"
+    except Exception:
+        base = here / "data"
+
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        base = Path.cwd()
+
+    return base
+
+
+DATA_DIR = _detect_data_dir()
+CONFIG_PATH = DATA_DIR / "config.yml"
+LOG_FILE = DATA_DIR / "wrpbypass.log"
 
 KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
 MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004
 
-style = Style.from_dict(
-    {
-        # base colors
-        "info": "ansiblue",
-        "error": "bold ansired",
-        "warn": "ansiyellow",
-        "ok": "ansigreen",
-        
-        # menu-specific accents
-        "menu-number": "bold #00bfff",        # ярко-голубой для номеров
-        "menu-text": "ansiwhite",              # белый для обычного текста
-        "menu-danger": "bold #ff6b6b",         # мягкий красный для опасных
-        "menu-warn": "bold #ffd93d",           # яркий желтый для предупреждений
-        "menu-highlight": "bold #00bfff bg:#2d5a7a",  # выделенный пункт
-        
-        # logo
-        "logo-main": "bold italic #00bfff",    # основной логотип
-        "logo-meta": "italic #6c8c9f",         # мета-информация (приглушенный)
-        
-        # status indicators
-        "status-online": "bold #51cf66",       # зеленый
-        "status-offline": "bold #ff6b6b",      # красный
-        "status-busy": "bold #ffd93d",         # желтый
-        
-        # borders and decorations
-        "border": "#4a6fa5",                  # приглушенный синий
-        "border-soft": "#2d5a7a",             # темно-синий
-    }
-)
+_DEFAULT_STYLE_DICT = {
+    # base colors
+    "info": "ansiblue",
+    "error": "bold ansired",
+    "warn": "ansiyellow",
+    "ok": "ansigreen",
+    # menu-specific accents
+    "menu-number": "bold #00bfff",
+    "menu-text": "#cccccc",
+    "menu-danger": "bold #ff6b6b",
+    "menu-warn": "bold #ffd93d",
+    "menu-highlight": "bold #00bfff bg:#2d5a7a",
+    # logo
+    "logo-main": "bold italic #00bfff",
+    "logo-meta": "italic #6c8c9f",
+    # status indicators
+    "status-online": "bold #51cf66",
+    "status-offline": "bold #ff6b6b",
+    "status-busy": "bold #ffd93d",
+    # borders and decorations
+    "border": "#4a6fa5",
+    "border-soft": "#2d5a7a",
+}
+
+_NO_COLOR_STYLE_DICT = {k: "" for k in _DEFAULT_STYLE_DICT.keys()}
+
+style = Style.from_dict(_DEFAULT_STYLE_DICT)
+
+
+def _str_to_bool(value: str, default: bool = True) -> bool:
+    v = (value or "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
+def configure_style(use_color: bool) -> None:
+    """Rebuild global style with or without colors."""
+    global style
+    style_dict = _DEFAULT_STYLE_DICT if use_color else _NO_COLOR_STYLE_DICT
+    style = Style.from_dict(style_dict)
 
 
 def info(text: str) -> None:
@@ -80,6 +143,43 @@ def log_action(action: str) -> None:
     except Exception:
         # Logging must never break main functionality
         pass
+
+
+def _load_config() -> dict:
+    """Load simple key: value config from CONFIG_PATH (YAML-like, no extra deps)."""
+    cfg: dict[str, str] = {}
+    if not CONFIG_PATH.is_file():
+        return cfg
+    try:
+        text = CONFIG_PATH.read_text(encoding="utf-8", errors="ignore")
+    except Exception as e:
+        log_action(f"Failed to read config.yml: {e!r}")
+        return cfg
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        key, val = line.split(":", 1)
+        cfg[key.strip().lower()] = val.strip()
+    return cfg
+
+
+def _ensure_default_config() -> None:
+    """Create minimal config.yml if missing."""
+    if CONFIG_PATH.exists():
+        return
+    content = (
+        "# wrpbypass configuration\n"
+        "# color: true|false (default: true)\n"
+        "color: true\n"
+    )
+    try:
+        CONFIG_PATH.write_text(content, encoding="utf-8")
+    except Exception as e:
+        log_action(f"Failed to write default config.yml: {e!r}")
 
 
 def ask(label: str) -> str:
@@ -585,6 +685,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="CLI tool for Windows local user and group administration.",
     )
 
+    parser.add_argument(
+        "--nocolor",
+        action="store_true",
+        help="Disable colored output (monochrome).",
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # user subcommands
@@ -817,6 +923,16 @@ def main(argv: List[str] | None = None) -> int:
         if argv is None:
             argv = sys.argv[1:]
 
+        # Ensure config.yml exists and read settings
+        _ensure_default_config()
+        cfg = _load_config()
+        use_color = _str_to_bool(cfg.get("color", "true"), default=True)
+
+        # Environment override: WRP_NOCOLOR=1 disables colors completely
+        env_nc = os.environ.get("WRP_NOCOLOR")
+        if env_nc is not None and _str_to_bool(env_nc, default=True):
+            use_color = False
+
         # When compiled as Utilman.exe and launched from Windows logon screen,
         # the system may pass a "/debug" argument. In that case we ignore
         # the arguments and go straight to interactive menu.
@@ -828,6 +944,11 @@ def main(argv: List[str] | None = None) -> int:
         if argv:
             parser = build_parser()
             args = parser.parse_args(argv)
+
+            if getattr(args, "nocolor", False):
+                use_color = False
+
+            configure_style(use_color)
 
             if not hasattr(args, "func"):
                 parser.print_help()
@@ -841,6 +962,7 @@ def main(argv: List[str] | None = None) -> int:
             return rc
 
         # No arguments: run simple interactive menu.
+        configure_style(use_color)
         while True:
             clear_screen()
             # Colored ASCII logo
