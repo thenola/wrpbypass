@@ -6,15 +6,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WINRE_LINUX="${SCRIPT_DIR}/winre_linux.py"
+WINRE_LINUX="${SCRIPT_DIR}/wrpbypass_deb.py"
 
 if [[ ! -f "$WINRE_LINUX" ]]; then
-  echo "[!] winre_linux.py not found in ${SCRIPT_DIR}"
+  echo "[!] wrpbypass_deb.py not found in ${SCRIPT_DIR}"
   exit 1
 fi
 
 # Устанавливаем правильные права на выполнение
-echo "[+] Setting execute permissions on winre_linux.py"
+echo "[+] Setting execute permissions on wrpbypass_deb.py"
 chmod 755 "$WINRE_LINUX"
 
 echo "=== wrpbypass helper for Debian/Ubuntu Live ==="
