@@ -17,7 +17,7 @@ from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
 
 
-VERSION = "1.3"
+VERSION = "1.4"
 GITHUB = "thenola/wrpbypass"
 
 
