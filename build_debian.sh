@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bash 
 
 # Build self-contained Linux executable for wrpbypass_deb.py
 # Use this INSIDE Debian/Ubuntu (e.g. Live USB), after unpacking wrpbypass_debian.zip.
