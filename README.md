@@ -27,8 +27,6 @@ Windows recovery helper for managing local users and temporarily replacing `Util
   - Mounts a Windows partition and replaces/restores `Utilman.exe` on that offline installation.
   - Supports a `--dry-run` mode (simulation only).
 
-- `pydeb.sh` – small interactive wrapper for `wrpbypass_deb.py` on Debian/Ubuntu Live.
-
 - `build_windows.bat` – build self‑contained Windows executable (`Utilman.exe`) via PyInstaller.
 - `build_debian.bat` – prepare a **Debian helper bundle** (`wrpbypass_debian.zip`) on Windows.
 - `build_debian.sh` – build a self‑contained Linux executable from `wrpbypass_deb.py` on Debian/Ubuntu (`dist_debian/wrpbypass_deb`).
@@ -160,6 +158,14 @@ The resulting file will be:
 
 You can rename it if desired (for example to `wrpbypass.exe`) before copying to `C:\Windows\System32`.
 
+> **If you see `PermissionError: [WinError 5] Access is denied: 'C:\\Users\\...\\dist\\Utilman.exe' during build**
+>
+> This usually means `Utilman.exe` from the last build is still running (for example, you launched it for testing and did not close it).  
+> Before rebuilding:
+> - Close all consoles / windows that were started via this `Utilman.exe`.  
+> - In Task Manager, find and **end the `Utilman.exe` process** (if it is still present).  
+> - Then re‑run `build_windows.bat`.
+
 ### 3. Build Debian helper ZIP from Windows
 
 To prepare files for Debian/Ubuntu Live, from Windows:
@@ -168,11 +174,8 @@ To prepare files for Debian/Ubuntu Live, from Windows:
 build_debian.bat
 ```
 
-This will create:
+This will create a helper archive:
 
-- `dist\debian\wrpbypass_deb.py`
-- `dist\debian\pydeb.sh`
-- `dist\debian\chmod.txt` (optional helper)
 - `dist\wrpbypass_debian.zip` – ready to copy to a USB stick.
 
 ## Building on Debian/Ubuntu
@@ -185,16 +188,16 @@ This will create:
 ```bash
 unzip wrpbypass_debian.zip
 cd wrpbypass
-chmod +x pydeb.sh wrpbypass_deb.py
+chmod +x wrpbypass_deb.py
 ```
 
-3. Run helper:
+3. Run interactive helper:
 
 ```bash
-./pydeb.sh
+sudo python3 wrpbypass_deb.py
 ```
 
-Follow the prompts to select the Windows partition and choose **install hook** or **restore**.
+`wrpbypass_deb.py` with **no arguments** now shows an interactive menu (device selection, mode `install` / `restore`, path to `Utilman.exe`), полностью заменяя старый `pydeb.sh`.
 
 ### Option B: Build a standalone Linux binary
 
@@ -225,15 +228,15 @@ sudo ./dist_debian/wrpbypass_deb --device /dev/sda1 --mountpoint /mnt/win --mode
 3. Run:
 
 ```bash
-sudo ./pydeb.sh
+sudo python3 wrpbypass_deb.py
 ```
 
-4. Choose **Install hook**, select the correct Windows partition and path to `wrpbypass.exe`.
+4. In the interactive menu choose **Install hook**, select the correct Windows partition and path to `Utilman.exe` (or your `wrpbypass.exe` build).
 5. Reboot into Windows; on the logon screen press the **Ease of Access** button to start `wrpbypass` instead of the usual accessibility tools.
 
 ### 2. Restore the original `Utilman.exe` from Linux
 
-Same as above, but choose **Restore original Utilman.exe** in `pydeb.sh`.
+Same as above, but in the interactive menu choose **Restore original Utilman.exe**.
 
 ### 3. Restore `Utilman.exe` from Windows
 
@@ -272,12 +275,52 @@ wrpbypass.exe utilman restore-now
   - The ASCII banner uses `pyfiglet`. In the packaged EXE, fonts may not be available.
   - The banner rendering is wrapped in `try/except` so that failure will not crash the program; at worst, you simply won’t see the ASCII logo.
 
-## Logging
+## Configuration and Logging
 
-`wrpbypass` writes a simple text log:
+### Config file (`config.yml`)
 
-- File: `wrpbypass.log` in the working directory.
-- Records timestamped actions such as user creation/deletion, changes in `Utilman.exe`, running external programs, viewing system info, and fallback events (e.g., input or banner failures).
+`wrpbypass` reads a very simple YAML‑like config file:
 
-This can be useful for auditing what was done during a recovery session.
+- Location (on Windows by default): `C:\ProgramData\wrpbypass\config.yml`  
+  - You can override the base directory by setting the `WRP_DIR` environment variable.
+
+On first start, a default `config.yml` is created:
+
+```yaml
+# wrpbypass configuration
+# color: true|false (default: true)
+color: true
+# log_enabled: true|false (default: true)
+log_enabled: true
+# log_commands: true|false (default: true) – log underlying net/command calls
+log_commands: true
+```
+
+Options:
+
+- `color` – enables/disables colored output (menu + messages).
+  - Can also be forced off with environment variable `WRP_NOCOLOR=1`.
+- `log_enabled` – master switch for logging:
+  - `true` – all events are written to the log.
+  - `false` – logging is completely disabled.
+- `log_commands` – when `true`, internal calls that you choose to log (e.g. `net user` / `net localgroup`) are also written to the log.  
+  (The code uses this flag to decide, какие команды писать подробнее.)
+
+### Log file (`wrpbypass.log`)
+
+By default on Windows the log is stored in:
+
+- `C:\ProgramData\wrpbypass\wrpbypass.log`
+
+You can change the base directory by setting `WRP_DIR` before starting `wrpbypass`; in that case both `config.yml` and `wrpbypass.log` will be placed under that folder.
+
+Format:
+
+- At the beginning of each run `wrpbypass` writes a **session header**:
+  - Start time, tool version, mode (`cli` or `interactive`), computer name, user, domain, executable path, data directory, `WRP_DIR`/`WRP_NOCOLOR` values, Windows version.
+- Each subsequent line is an event:
+  - `[{timestamp}][{mode}] {action}`
+  - Where `{mode}` is `cli` or `interactive`.
+
+This extended log is intended to make it easier to audit what exactly было сделано во время сессии восстановления.
 
