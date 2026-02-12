@@ -1,1 +1,0 @@
-chmod 775 wrpbypass_deb.py 
