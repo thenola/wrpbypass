@@ -27,7 +27,7 @@ def _detect_data_dir() -> Path:
 
     Priority:
     1) WRP_DIR environment variable
-    2) If running from System32 -> C:\\ProgramData\\wrpbypass
+    2) On Windows: C:\\ProgramData\\wrpbypass
     3) Otherwise: <script_dir>\\data
     """
     env = os.environ.get("WRP_DIR")
@@ -39,23 +39,17 @@ def _detect_data_dir() -> Path:
         except Exception:
             pass
 
-    try:
-        if getattr(sys, "frozen", False):
-            here = Path(sys.executable).resolve().parent
-        else:
-            here = Path(__file__).resolve().parent
-    except Exception:
-        here = Path.cwd()
-
-    system_root = Path(os.environ.get("SystemRoot", r"C:\\Windows"))
-    system32 = system_root / "System32"
-
-    try:
-        if here.samefile(system32):
-            base = Path(os.environ.get("SystemDrive", "C:")) / "ProgramData" / "wrpbypass"
-        else:
-            base = here / "data"
-    except Exception:
+    # On Windows – always use C:\ProgramData\wrpbypass by default
+    if os.name == "nt":
+        base = Path(os.environ.get("ProgramData", r"C:\\ProgramData")) / "wrpbypass"
+    else:
+        try:
+            if getattr(sys, "frozen", False):
+                here = Path(sys.executable).resolve().parent
+            else:
+                here = Path(__file__).resolve().parent
+        except Exception:
+            here = Path.cwd()
         base = here / "data"
 
     try:
@@ -69,6 +63,12 @@ def _detect_data_dir() -> Path:
 DATA_DIR = _detect_data_dir()
 CONFIG_PATH = DATA_DIR / "config.yml"
 LOG_FILE = DATA_DIR / "wrpbypass.log"
+
+# Logging/session meta
+LOG_SESSION_MODE = "unknown"  # "cli" or "interactive"
+_LOG_HEADER_WRITTEN = False
+LOG_ENABLED = True
+LOG_LOG_COMMANDS = True
 
 KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
 MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004
@@ -135,11 +135,56 @@ def error(text: str) -> None:
 
 
 def log_action(action: str) -> None:
-    """Append simple timestamped entry to wrpbypass.log (best-effort)."""
+    """Append extended, timestamped entry to wrpbypass.log (best-effort)."""
+    global _LOG_HEADER_WRITTEN, LOG_ENABLED
+    if not LOG_ENABLED:
+        return
     try:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Prepare session header once per run
+        if not _LOG_HEADER_WRITTEN:
+            _LOG_HEADER_WRITTEN = True
+            try:
+                comp = os.environ.get("COMPUTERNAME", "") or "unknown"
+                user = os.environ.get("USERNAME") or getpass.getuser()
+                domain = os.environ.get("USERDOMAIN", "") or "unknown"
+            except Exception:
+                comp = "unknown"
+                user = "unknown"
+                domain = "unknown"
+
+            exe_path = (
+                Path(sys.executable).resolve()
+                if getattr(sys, "frozen", False)
+                else Path(__file__).resolve()
+            )
+            win_ver = platform.platform()
+            wrp_dir = os.environ.get("WRP_DIR") or ""
+            no_color_env = os.environ.get("WRP_NOCOLOR") or ""
+
+            header_lines = [
+                "==== wrpbypass session start ====",
+                f"time={ts}",
+                f"version={VERSION}",
+                f"mode={LOG_SESSION_MODE}",
+                f"computer={comp}",
+                f"user={user}",
+                f"domain={domain}",
+                f"executable={exe_path}",
+                f"data_dir={DATA_DIR}",
+                f"env_WRP_DIR={wrp_dir}",
+                f"env_WRP_NOCOLOR={no_color_env}",
+                f"windows={win_ver}",
+                "---------------------------------",
+            ]
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                for line in header_lines:
+                    f.write(line + "\n")
+
+        # Write actual event line
         with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"[{ts}] {action}\n")
+            f.write(f"[{ts}][{LOG_SESSION_MODE}] {action}\n")
     except Exception:
         # Logging must never break main functionality
         pass
@@ -175,6 +220,10 @@ def _ensure_default_config() -> None:
         "# wrpbypass configuration\n"
         "# color: true|false (default: true)\n"
         "color: true\n"
+        "# log_enabled: true|false (default: true)\n"
+        "log_enabled: true\n"
+        "# log_commands: true|false (default: true) – log underlying net/command calls\n"
+        "log_commands: true\n"
     )
     try:
         CONFIG_PATH.write_text(content, encoding="utf-8")
@@ -919,6 +968,7 @@ def main(argv: List[str] | None = None) -> int:
     - Interactive menu (no arguments) — simple prompt-based workflow.
     Ctrl+C anywhere results in a clean exit without traceback.
     """
+    global LOG_SESSION_MODE
     try:
         if argv is None:
             argv = sys.argv[1:]
@@ -927,6 +977,13 @@ def main(argv: List[str] | None = None) -> int:
         _ensure_default_config()
         cfg = _load_config()
         use_color = _str_to_bool(cfg.get("color", "true"), default=True)
+
+        # Logging-related config
+        global LOG_ENABLED, LOG_LOG_COMMANDS
+        LOG_ENABLED = _str_to_bool(cfg.get("log_enabled", "true"), default=True)
+        LOG_LOG_COMMANDS = _str_to_bool(
+            cfg.get("log_commands", "true"), default=True
+        )
 
         # Environment override: WRP_NOCOLOR=1 disables colors completely
         env_nc = os.environ.get("WRP_NOCOLOR")
@@ -942,6 +999,7 @@ def main(argv: List[str] | None = None) -> int:
 
         # If arguments are provided – keep the original CLI behavior.
         if argv:
+            LOG_SESSION_MODE = "cli"
             parser = build_parser()
             args = parser.parse_args(argv)
 
@@ -962,6 +1020,7 @@ def main(argv: List[str] | None = None) -> int:
             return rc
 
         # No arguments: run simple interactive menu.
+        LOG_SESSION_MODE = "interactive"
         configure_style(use_color)
         while True:
             clear_screen()
