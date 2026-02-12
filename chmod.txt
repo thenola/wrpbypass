@@ -1,0 +1,2 @@
+chmod 775 winre_linux.py
+chmod 775 deb.sh

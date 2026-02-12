@@ -1,0 +1,1 @@
+@pyinstaller -F wrpbypass.py --name wrpbypass --distpath dist
