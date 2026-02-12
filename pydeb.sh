@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 
 # Quick helper script for Debian-based Live systems
-# to install or restore winre on a Windows partition.
+# to install or restore wrpbypass on a Windows partition.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WINRE_LINUX="${SCRIPT_DIR}/wrpbypass_deb.py"
+WRPBYPASS_LINUX="${SCRIPT_DIR}/wrpbypass_deb.py"
 
-if [[ ! -f "$WINRE_LINUX" ]]; then
+if [[ ! -f "$WRPBYPASS_LINUX" ]]; then
   echo "[!] wrpbypass_deb.py not found in ${SCRIPT_DIR}"
   exit 1
 fi
 
 # Устанавливаем правильные права на выполнение
 echo "[+] Setting execute permissions on wrpbypass_deb.py"
-chmod 755 "$WINRE_LINUX"
+chmod 755 "$WRPBYPASS_LINUX"
 
 echo "=== wrpbypass helper for Debian/Ubuntu Live ==="
 echo
@@ -54,27 +54,27 @@ if [[ "$MODE" == "install" ]]; then
     read -rp "Use this path? [Y/n]: " USE_DEFAULT
     USE_DEFAULT=${USE_DEFAULT:-Y}
     if [[ "$USE_DEFAULT" =~ ^[Yy]$ ]]; then
-      WINRE_EXE="$DEFAULT_WRP_EXE"
+      WRPBYPASS_EXE="$DEFAULT_WRP_EXE"
     fi
   fi
 
-  if [[ -z "${WINRE_EXE:-}" ]]; then
+  if [[ -z "${WRPBYPASS_EXE:-}" ]]; then
     echo "You must provide path to wrpbypass.exe (built from wrpbypass.py), e.g. /media/usb/dist/wrpbypass.exe"
-    read -rp "Path to winre.exe: " WINRE_EXE
+    read -rp "Path to Utilman.exe: " WRPBYPASS_EXE
   fi
 
-  if [[ -z "${WINRE_EXE}" || ! -f "${WINRE_EXE}" ]]; then
+  if [[ -z "${WRPBYPASS_EXE}" || ! -f "${WRPBYPASS_EXE}" ]]; then
     echo "[!] wrpbypass.exe not found at given path."
     exit 1
   fi
 
-  sudo python3 "$WINRE_LINUX" \
+  sudo python3 "$WRPBYPASS_LINUX" \
     --device "$DEVICE" \
     --mountpoint "$MOUNTPOINT" \
     --mode install \
-    --wrpbypass-exe "$WINRE_EXE"
+    --wrpbypass-exe "$WRPBYPASS_EXE"
 else
-  sudo python3 "$WINRE_LINUX" \
+  sudo python3 "$WRPBYPASS_LINUX" \
     --device "$DEVICE" \
     --mountpoint "$MOUNTPOINT" \
     --mode restore

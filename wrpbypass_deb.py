@@ -115,7 +115,7 @@ def restore_files(win_root, dry_run=False):
 
 def main(): 
     parser = argparse.ArgumentParser(
-        description="winre_linux: replace/restore Utilman.exe on a Windows partition"
+        description="wrpbypass_linux: replace/restore Utilman.exe on a Windows partition"
     )
     parser.add_argument("--device", required=True, help="Windows partition device (e.g. /dev/sda1)")
     parser.add_argument("--mountpoint", default="/mnt/win", help="Mount point (default: /mnt/win)")
