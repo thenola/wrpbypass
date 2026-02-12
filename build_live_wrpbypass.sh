@@ -33,7 +33,7 @@ for cmd in unsquashfs mksquashfs xorriso rsync; do
     echo "[!] Required tool '$cmd' not found. Install 'squashfs-tools', 'xorriso', 'rsync'."
     exit 1
   fi
-fi
+done
 
 WORKDIR=$(mktemp -d -t wrpbypass_live_XXXX)
 ISO_DIR="$WORKDIR/iso"
