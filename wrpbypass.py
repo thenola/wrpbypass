@@ -6,6 +6,9 @@ import sys
 import os
 from pathlib import Path
 from typing import List
+from datetime import datetime
+import platform
+import getpass
 
 import ctypes
 from prompt_toolkit import prompt
@@ -14,15 +17,40 @@ from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
 
 
+VERSION = "1.2"
+GITHUB = "thenola/wrpbypass"
+LOG_FILE = "wrpbypass.log"
+
 KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
 MOVEFILE_DELAY_UNTIL_REBOOT = 0x00000004
 
 style = Style.from_dict(
     {
+        # base colors
         "info": "ansiblue",
         "error": "bold ansired",
         "warn": "ansiyellow",
         "ok": "ansigreen",
+        
+        # menu-specific accents
+        "menu-number": "bold #00bfff",        # ярко-голубой для номеров
+        "menu-text": "ansiwhite",              # белый для обычного текста
+        "menu-danger": "bold #ff6b6b",         # мягкий красный для опасных
+        "menu-warn": "bold #ffd93d",           # яркий желтый для предупреждений
+        "menu-highlight": "bold #00bfff bg:#2d5a7a",  # выделенный пункт
+        
+        # logo
+        "logo-main": "bold italic #00bfff",    # основной логотип
+        "logo-meta": "italic #6c8c9f",         # мета-информация (приглушенный)
+        
+        # status indicators
+        "status-online": "bold #51cf66",       # зеленый
+        "status-offline": "bold #ff6b6b",      # красный
+        "status-busy": "bold #ffd93d",         # желтый
+        
+        # borders and decorations
+        "border": "#4a6fa5",                  # приглушенный синий
+        "border-soft": "#2d5a7a",             # темно-синий
     }
 )
 
@@ -43,9 +71,28 @@ def error(text: str) -> None:
     print_formatted_text(HTML(f"<error>{text}</error>"), style=style, file=sys.stderr)
 
 
+def log_action(action: str) -> None:
+    """Append simple timestamped entry to wrpbypass.log (best-effort)."""
+    try:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {action}\n")
+    except Exception:
+        # Logging must never break main functionality
+        pass
+
+
 def ask(label: str) -> str:
     """Prompt user for input with basic styling."""
-    return prompt(HTML(f"<info>{label}</info> ")).strip()
+    return prompt(HTML(f"<u><b><info>{label}</info></b></u>&gt; ")).strip()
+
+def pause(label: str) -> str:
+    """Prompt user for input with basic styling."""
+    return prompt(HTML(f"\n&lt;<u><b><info>back</info></b></u> ")).strip()
+
+def clear_screen() -> None:
+    """Clear the console screen (cls on Windows, clear on others)."""
+    os.system("cls" if os.name == "nt" else "clear")
 
 
 def _get_system32() -> Path:
@@ -764,153 +811,288 @@ def main(argv: List[str] | None = None) -> int:
     Two working modes:
     - CLI mode (with arguments) — full wrpbypass CLI.
     - Interactive menu (no arguments) — simple prompt-based workflow.
+    Ctrl+C anywhere results in a clean exit without traceback.
     """
-    if argv is None:
-        argv = sys.argv[1:]
+    try:
+        if argv is None:
+            argv = sys.argv[1:]
 
-    # If arguments are provided – keep the original CLI behavior.
-    if argv:
-        parser = build_parser()
-        args = parser.parse_args(argv)
+        # When compiled as Utilman.exe and launched from Windows logon screen,
+        # the system may pass a "/debug" argument. In that case we ignore
+        # the arguments and go straight to interactive menu.
+        if argv and len(argv) == 1 and argv[0].lower().startswith("/debug"):
+            log_action("Detected /debug argument from shell, switching to interactive menu")
+            argv = []
 
-        if not hasattr(args, "func"):
-            parser.print_help()
-            return 1
+        # If arguments are provided – keep the original CLI behavior.
+        if argv:
+            parser = build_parser()
+            args = parser.parse_args(argv)
 
-        rc = args.func(args)
-        if rc == 5:
-            error(
-                "Access denied. Run Command Prompt/PowerShell as administrator."
-            )
-        return rc
+            if not hasattr(args, "func"):
+                parser.print_help()
+                return 1
 
-    # No arguments: run simple interactive menu.
-    while True:
-        print_formatted_text(
-            HTML("<info>\n=== wrpbypass interactive ===</info>"),
-            style=style,
-        )
-        print_formatted_text(
-            HTML("  <info>1)</info> List users"),
-            style=style,
-        )
-        print_formatted_text(
-            HTML("  <info>2)</info> Show user"),
-            style=style,
-        )
-        print_formatted_text(
-            HTML("  <info>3)</info> Create user"),
-            style=style,
-        )
-        print_formatted_text(
-            HTML("  <info>4)</info> Delete user"),
-            style=style,
-        )
-        print_formatted_text(
-            HTML("  <info>5)</info> Enable / disable user"),
-            style=style,
-        )
-        print_formatted_text(
-            HTML("  <info>6)</info> Change user password"),
-            style=style,
-        )
-        print_formatted_text(
-            HTML("  <info>7)</info> List local groups"),
-            style=style,
-        )
-        print_formatted_text(
-            HTML(
-                "  <info>8)</info> Schedule Utilman.exe restore (after reboot)"
-            ),
-            style=style,
-        )
-        print_formatted_text(
-            HTML(
-                "  <info>9)</info> Install Utilman.exe hook (replace with wrpbypass)"
-            ),
-            style=style,
-        )
-        print_formatted_text(
-            HTML(
-                "  <info>10)</info> Restore Utilman.exe now (no reboot, if possible)"
-            ),
-            style=style,
-        )
-        print_formatted_text(
-            HTML("  <info>0)</info> Exit"),
-            style=style,
-        )
-
-        choice = ask("Choice:")
-
-        try:
-            if choice == "1":
-                ns = argparse.Namespace(domain=False)
-                cmd_user_list(ns)
-            elif choice == "2":
-                name = ask("Username:")
-                if name:
-                    ns = argparse.Namespace(username=name, domain=False)
-                    cmd_user_show(ns)
-            elif choice == "3":
-                name = ask("New username:")
-                if not name:
-                    continue
-                password = ask("Password:")
-                fullname = ask("Full name (optional, Enter to skip):")
-                active_raw = ask(
-                    "Enable account immediately? [yes/no] (Enter=yes):"
-                ).strip().lower()
-                if active_raw not in ("yes", "no", ""):
-                    active_raw = "yes"
-                ns = argparse.Namespace(
-                    username=name,
-                    password=password,
-                    fullname=fullname or None,
-                    active=None if active_raw == "" else active_raw == "yes",
+            rc = args.func(args)
+            if rc == 5:
+                error(
+                    "Access denied. Run Command Prompt/PowerShell as administrator."
                 )
-                cmd_user_add(ns)
-            elif choice == "4":
-                name = ask("Username to delete:")
-                if name:
+            return rc
+
+        # No arguments: run simple interactive menu.
+        while True:
+            clear_screen()
+            # Colored ASCII logo
+            print_formatted_text(
+                HTML(
+                    f"""
+<logo-main> 8b      db      d8 8b,dPPYba, 8b,dPPYba,</logo-main>    <logo-meta>Version: {VERSION}</logo-meta>
+<logo-main> `8b    d88b    d8' 88P'   "Y8 88P'    "8a</logo-main>   <logo-meta>Github: {GITHUB}</logo-meta>
+<logo-main>  `8b  d8'`8b  d8'  88         88       d8</logo-main>
+<logo-main>   `8bd8'  `8bd8'   88         88b,   ,a8"</logo-main>
+<logo-main>     YP      YP     88         88`YbbdP"'</logo-main>
+<logo-main>                               88</logo-main>
+<logo-main>                               88</logo-main>
+"""
+                ),
+                style=style,
+            )
+
+            print_formatted_text(
+                HTML("  <menu-number>1)</menu-number> <menu-text>List users</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>2)</menu-number> <menu-text>Show user</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>3)</menu-number> <menu-text>Create user</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>4)</menu-number> <menu-text>Delete user</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>5)</menu-number> <menu-text>Enable / disable user</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>6)</menu-number> <menu-text>Change user password</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>7)</menu-number> <menu-text>List local groups</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML(
+                    "  <menu-warn>8)</menu-warn> <menu-warn>Schedule Utilman.exe restore (after reboot)</menu-warn>"
+                ),
+                style=style,
+            )
+            print_formatted_text(
+                HTML(
+                    "  <menu-warn>9)</menu-warn> <menu-warn>Install Utilman.exe hook (replace with wrpbypass)</menu-warn>"
+                ),
+                style=style,
+            )
+            print_formatted_text(
+                HTML(
+                    "  <menu-warn>10)</menu-warn> <menu-warn>Restore Utilman.exe now (no reboot, if possible)</menu-warn>"
+                ),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>11)</menu-number> <menu-text>Run custom program / command</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>12)</menu-number> <menu-text>Show system info</menu-text>"),
+                style=style,
+            )
+            print_formatted_text(
+                HTML("  <menu-number>0)</menu-number> <menu-text>Exit</menu-text>"),
+                style=style,
+            )
+
+            choice = ask("\nwrpbypass")
+
+            try:
+                if choice == "1":
+                    ns = argparse.Namespace(domain=False)
+                    cmd_user_list(ns)
+                elif choice == "2":
+                    name = ask("Username")
+                    if name:
+                        ns = argparse.Namespace(username=name, domain=False)
+                        cmd_user_show(ns)
+                elif choice == "3":
+                    name = ask("New username")
+                    if not name:
+                        continue
+                    password = ask("Password")
+                    fullname = ask("Full name (optional, Enter to skip)")
+                    active_raw = ask(
+                        "Enable account immediately? [yes/no] (Enter=yes)"
+                    ).strip().lower()
+                    if active_raw not in ("yes", "no", ""):
+                        active_raw = "yes"
+                    ns = argparse.Namespace(
+                        username=name,
+                        password=password,
+                        fullname=fullname or None,
+                        active=None if active_raw == "" else active_raw == "yes",
+                    )
+                    cmd_user_add(ns)
+                elif choice == "4":
+                    name = ask("Username to delete")
+                    if name:
+                        confirm = ask(f"Delete user '{name}'? [yes/no]")
+                        if confirm.strip().lower() == "yes":
+                            ns = argparse.Namespace(username=name)
+                            cmd_user_delete(ns)
+                            log_action(f"Deleted user '{name}'")
+                elif choice == "5":
+                    name = ask("Username")
+                    if not name:
+                        continue
+                    mode = ask("Enter 'on' to enable or 'off' to disable")
                     ns = argparse.Namespace(username=name)
-                    cmd_user_delete(ns)
-            elif choice == "5":
-                name = ask("Username:")
-                if not name:
-                    continue
-                mode = ask("Enter 'on' to enable or 'off' to disable:")
-                ns = argparse.Namespace(username=name)
-                if mode.lower().startswith("on"):
-                    cmd_user_enable(ns)
-                elif mode.lower().startswith("off"):
-                    cmd_user_disable(ns)
+                    if mode.lower().startswith("on"):
+                        cmd_user_enable(ns)
+                        log_action(f"Enabled user '{name}'")
+                    elif mode.lower().startswith("off"):
+                        cmd_user_disable(ns)
+                        log_action(f"Disabled user '{name}'")
+                    else:
+                        warn("Invalid mode, use 'on' or 'off'.")
+                elif choice == "6":
+                    name = ask("Username")
+                    if not name:
+                        continue
+                    password = ask("New password")
+                    ns = argparse.Namespace(username=name, password=password)
+                    cmd_user_set_password(ns)
+                    log_action(f"Changed password for user '{name}'")
+                elif choice == "7":
+                    ns = argparse.Namespace()
+                    cmd_group_list(ns)
+                elif choice == "8":
+                    confirm = ask(
+                        "Schedule Utilman.exe restore on next reboot? [yes/no]"
+                    )
+                    if confirm.strip().lower() == "yes":
+                        schedule_restore_utilman()
+                        log_action("Scheduled Utilman.exe restore on reboot")
+                elif choice == "9":
+                    confirm = ask(
+                        "Install Utilman.exe hook (replace with wrpbypass)? [yes/no]"
+                    )
+                    if confirm.strip().lower() == "yes":
+                        install_utilman_hook()
+                        log_action("Installed Utilman.exe hook")
+                elif choice == "10":
+                    confirm = ask(
+                        "Try to restore Utilman.exe immediately (no reboot)? [yes/no]"
+                    )
+                    if confirm.strip().lower() == "yes":
+                        restore_utilman_now()
+                        log_action("Tried immediate Utilman.exe restore")
+                elif choice == "11":
+                    print_formatted_text(
+                        HTML(
+                            "<info>Presets:</info>\n"
+                            "  1) cmd.exe\n"
+                            "  2) powershell.exe\n"
+                            "  3) explorer.exe\n"
+                            "  4) mmc.exe\n"
+                        ),
+                        style=style,
+                    )
+                    preset = ask("Preset number (Enter=custom)")
+                    if preset == "1":
+                        cmdline = "cmd.exe"
+                    elif preset == "2":
+                        cmdline = "powershell.exe"
+                    elif preset == "3":
+                        cmdline = "explorer.exe"
+                    elif preset == "4":
+                        cmdline = "mmc.exe"
+                    else:
+                        cmdline = ask(
+                            "Enter full command or path to program (e.g. cmd.exe or C:\\Windows\\System32\\cmd.exe)"
+                        )
+                    if not cmdline:
+                        continue
+                    start_dir = ask(
+                        "Start directory (Enter = current working directory)"
+                    ).strip()
+                    cwd = start_dir or None
+                    try:
+                        completed = subprocess.run(cmdline, shell=True, cwd=cwd)
+                        info(f"Program exited with code {completed.returncode}.")
+                        log_action(
+                            f"Ran program '{cmdline}' (cwd={cwd or 'current'}) exit={completed.returncode}"
+                        )
+                    except Exception as e:
+                        error(f"Failed to run program: {e}")
+                        log_action(f"Failed to run program '{cmdline}': {e}")
+                elif choice == "12":
+                    # Show basic system info and optional Administrators membership
+                    comp_name = os.environ.get("COMPUTERNAME", "")
+                    user_name = os.environ.get("USERNAME") or getpass.getuser()
+                    domain = os.environ.get("USERDOMAIN", "")
+                    win_ver = platform.platform()
+                    print_formatted_text(
+                        HTML(
+                            f"<info>Computer:</info> {comp_name or 'unknown'}\n"
+                            f"<info>User:</info> {user_name}\n"
+                            f"<info>Domain/Workgroup:</info> {domain or 'unknown'}\n"
+                            f"<info>Windows:</info> {win_ver}"
+                        ),
+                        style=style,
+                    )
+                    check_user = ask(
+                        "Username to check in Administrators (Enter to skip)"
+                    ).strip()
+                    if check_user:
+                        proc = capture_output(
+                            ["net", "localgroup", "Administrators"]
+                        )
+                        is_admin = False
+                        if proc and proc.stdout:
+                            for line in proc.stdout.splitlines():
+                                if check_user.lower() in line.lower().split():
+                                    is_admin = True
+                                    break
+                        if is_admin:
+                            ok(f"User '{check_user}' IS in Administrators group.")
+                        else:
+                            warn(
+                                f"User '{check_user}' is NOT in Administrators group."
+                            )
+                    log_action("Viewed system info screen")
+                elif choice == "0":
+                    ok("Exit.")
+                    return 0
                 else:
-                    warn("Invalid mode, use 'on' or 'off'.")
-            elif choice == "6":
-                name = ask("Username:")
-                if not name:
-                    continue
-                password = ask("New password:")
-                ns = argparse.Namespace(username=name, password=password)
-                cmd_user_set_password(ns)
-            elif choice == "7":
-                ns = argparse.Namespace()
-                cmd_group_list(ns)
-            elif choice == "8":
-                schedule_restore_utilman()
-            elif choice == "9":
-                install_utilman_hook()
-            elif choice == "10":
-                restore_utilman_now()
-            elif choice == "0":
-                ok("Exit.")
+                    warn("Unknown menu item.")
+            except KeyboardInterrupt:
+                ok("\nExit by Ctrl+C.")
                 return 0
-            else:
-                warn("Unknown menu item.")
-        except KeyboardInterrupt:
-            ok("\nExit by Ctrl+C.")
-            return 0
+
+            # Small pause so the user can read command output before the screen is cleared.
+            try:
+                pause("")
+            except KeyboardInterrupt:
+                ok("\nExit by Ctrl+C.")
+                return 0
+    except KeyboardInterrupt:
+        ok("\nExit by Ctrl+C.")
+        return 0
 
 
 if __name__ == "__main__":

